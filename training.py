@@ -64,11 +64,13 @@ class BaseTextPreprocessor:
     """
     Provides methods for data processing for further classification
     """
-    def __init__(self, filename, collection):
+    def __init__(self, filename, collection, category=None):
         self.filename = filename
         self.lemmatizer = WordNetLemmatizer()
         self.collection = collection
         self.category_tokens = []
+        self.tweets_lemmas = []
+        self.category = category
 
     def get_training_ids(self):
         """
@@ -77,7 +79,7 @@ class BaseTextPreprocessor:
         :param filename: file from which to extract data
         :return: list with IDs
         """
-        with open(f"training_data\\{self.filename}", "r") as f:
+        with open(f"{self.filename}", "r") as f:
             ids = f.readlines()
             ids = [tweet_id.rstrip('\n') for tweet_id in ids]
 
@@ -239,11 +241,16 @@ class BaseTextPreprocessor:
                 pos_tokens = self.get_part_of_speech(tweet_tokens)
                 # print(pos_tokens)
 
+                tweet_lemmas = []
                 for token in pos_tokens:
                     lemma = self.lemmatize(token[0])
                     # print('lemma of', token[0], ':', lemma)
 
                     self.category_tokens.append(lemma)
+                    tweet_lemmas.append(lemma)
+
+                # append each tweet lemmas into this list
+                self.tweets_lemmas.append((tweet_lemmas, self.category))
             # print()
         print(len(self.category_tokens))
 
@@ -287,30 +294,50 @@ if __name__ == "__main__":
     collection = conn.get_english_collection()
 
     try:
+        # WORK WITH TRAINING DATA
         # work with positive tweets
-        positive = BaseTextPreprocessor(filename="positive.txt", collection=collection)
+        positive = BaseTextPreprocessor(filename="training_data\\positive.txt", collection=collection,
+                                        category='pos')
         positive.process_data()
         positive_features = positive.get_most_frequent(100)
         print(positive_features)
         positive_tokens = positive.category_tokens
         print(f'len of positive tokens: {len(positive_tokens)}')
+        positive_tweets = positive.tweets_lemmas
+        print('positive tweets', positive_tweets)
 
         # work with negative tweets
-        negative = BaseTextPreprocessor(filename="negative.txt", collection=collection)
+        negative = BaseTextPreprocessor(filename="training_data\\negative.txt", collection=collection,
+                                        category='neg')
         negative.process_data()
-        negative_features = negative.get_most_frequent(100)
-        print(negative_features)
         negative_tokens = negative.category_tokens
-        print(f'len of negative tokens: {len(negative_tokens)}')
+        negative_tweets = negative.tweets_lemmas
+        print('negative tweets', negative_tweets)
 
-        word_features = combine_and_shuffle(positive_tokens, negative_tokens)
+        word_features = combine_and_shuffle(positive_tokens, negative_tokens)[:3000]
+        print('word features', word_features)
         print(f'common length: {len(word_features)}')
 
-        # see which words are common for positive, and which are common for negative
-        positive_in_features = find_features(positive_tokens, word_features)
-        negative_in_features = find_features(negative_tokens, word_features)
-        print('positive', positive_in_features)
-        print('negative', negative_in_features)
+        documents = combine_and_shuffle(positive_tweets, negative_tweets)
+        # print(documents[0])
+
+        featuresets = []
+        for tweet, category in documents:
+            featuresets.append((find_features(tweet, word_features), category))
+        # print(len(featuresets))
+
+        training_set = featuresets[:600]
+        testing_set = featuresets[600:]
+
+        print(training_set[0])
+        print(testing_set[0])
+
+        classifier = nltk.NaiveBayesClassifier.train(training_set)
+        print("Classifier accuracy percent:", (nltk.classify.accuracy(classifier, testing_set)) * 100)
+
+        classifier.show_most_informative_features(15)
+
+
     except:
         traceback.print_exc()
 
