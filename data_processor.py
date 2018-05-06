@@ -1,8 +1,4 @@
-# {retweet_count: {$eq: 0},'entities.urls': {$size: 0},truncated: {$eq: false}}     {_id: -1}
-
 import nltk
-import traceback
-from pymongo import MongoClient
 from random import shuffle
 
 # check for wordnet presence, download if absent
@@ -38,67 +34,52 @@ except:
 STOPWORDS_ENG = set(stopwords.words("english"))
 
 
-class Connection:
+def combine_and_shuffle(*args):
     """
-    Represents a connection to MongoDB database
+    Randomize order of tweet tokens, so negative will be among positive
+    (not the whole negative group after whole positive group)
+    :return: shuffled list of joined together multiple lists
     """
-    def __init__(self):
-        self.client = MongoClient()
-        self.db = self.client['data']
-        self.collection_en = self.db['tweets_en']
+    res = []
 
-    def get_client(self):
-        return self.client
+    for datalist in args:
+        res += datalist
 
-    def get_db(self):
-        return self.db
+    shuffle(res)
 
-    def get_english_collection(self):
-        return self.collection_en
-
-    def close_connection(self):
-        self.client.close()
+    return res
 
 
-class BaseTextPreprocessor:
+def find_features(document, word_features):
+    """
+    Checks if words from word_features exist in a document
+
+    :param document: positive / negative tokens
+    :param word_features: common words from both negative and positive
+    :return:
+    """
+    words = set(document)
+    features = {}
+
+    for wf in word_features:
+        features[wf] = wf in words
+
+    return features
+
+
+class Base:
     """
     Provides methods for data processing for further classification
     """
-    def __init__(self, filename, collection, category=None):
-        self.filename = filename
+    def __init__(self, category=None):
+        """
+        :param category: a string that represents a category
+        """
+        self.category = category
         self.lemmatizer = WordNetLemmatizer()
-        self.collection = collection
         self.category_tokens = []
         self.tweets_lemmas = []
-        self.category = category
-
-    def get_training_ids(self):
-        """
-        Get IDs of training data in database
-
-        :param filename: file from which to extract data
-        :return: list with IDs
-        """
-        with open(f"{self.filename}", "r") as f:
-            ids = f.readlines()
-            ids = [tweet_id.rstrip('\n') for tweet_id in ids]
-
-        return ids
-
-    def get_text(self, tweet):
-        """
-        Find "full_text", if not present, find "text"
-        Not all tweets have full_text option, unfortunately :(
-
-        :param tweet: json object representing a tweet
-        :return: tweet['text'] or tweet['full_text']
-        """
-        try:
-            text = tweet["full_text"]
-        except:
-            text = tweet["text"]
-
-        return text
+        self.bigrams = []
 
     def tokenize_by_sentence(self, tweet):
         """
@@ -136,7 +117,7 @@ class BaseTextPreprocessor:
 
         :return: a list with general common words
         """
-        filename = 'common_words.txt'
+        filename = '..\\common_words.txt'
 
         with open(filename, 'r') as f:
             data = f.readlines()
@@ -217,24 +198,79 @@ class BaseTextPreprocessor:
         """
         return nltk.FreqDist(self.category_tokens).most_common(n)
 
+    def to_bigrams(self, tweet_sentence):
+        """
+        Forms bigrams from given sentence
+
+        :param tweet_sentence:
+        :return: list with bigrams of a sentence
+        """
+        self.bigrams += list(nltk.bigrams(tweet_sentence.split()))
+
+
+class TrainTextPreprocessor(Base):
+    """
+    Text Preprocessor for training data
+    Uses tweets ids to get tweets texts
+    """
+    def __init__(self, db_collection, filename=None, ids_list=None, category=None):
+        """
+        :param db_collection: database collection to get data from
+        :param filename: for trainig data where ids of tweets are stored in filenames
+        :param ids_list: list with tweets ids
+        """
+        super(TrainTextPreprocessor, self).__init__(category=category)
+        self.db_collection = db_collection
+        self.filename = filename
+        self.ids_list = ids_list
+
+    def get_training_ids(self):
+        """
+        Get IDs of training data in database
+
+        :return: list with tweet IDs
+        """
+        if self.ids_list:
+            return self.ids_list
+
+        with open(f"{self.filename}", "r") as f:
+            ids = f.readlines()
+            ids = [tweet_id.rstrip('\n') for tweet_id in ids]
+
+        return ids
+
+    def get_text(self, tweet):
+        """
+        Find "full_text", if not present, find "text"
+        Not all tweets have full_text option, unfortunately :(
+
+        :param tweet: json object representing a tweet
+        :return: tweet['text'] or tweet['full_text']
+        """
+        try:
+            text = tweet["full_text"]
+        except:
+            text = tweet["text"]
+
+        return text
+
     def process_data(self):
         """
         Data processing management
-
-        :return:
         """
         training_ids = self.get_training_ids()
 
         for tweet_id in training_ids:
             # print(tweet_id)
-            tweet = self.collection.find_one({"id": int(tweet_id)})
+            tweet = self.db_collection.find_one({"id": int(tweet_id)})
             tweet_text = self.get_text(tweet)
             # print(tweet_text)
             tweet_sentences = self.tokenize_by_sentence(tweet_text)
             # print('sentence tokenizer', tweet_sentences)
 
             for sentence in tweet_sentences:
-                # print(sentence)
+                # print('sentence', sentence)
+                self.to_bigrams(sentence)
                 tweet_tokens_all = self.tokenize_by_word(sentence)
                 # print('tokens', tweet_tokens_all)
                 tweet_tokens = self.left_significant_words(tweet_tokens_all)
@@ -255,92 +291,15 @@ class BaseTextPreprocessor:
         print(len(self.category_tokens))
 
 
-def combine_and_shuffle(*args):
+class TextPreprocessor(Base):
     """
-    Randomize order of tweet tokens, so negative will be among positive
-    (not the whole negative group after whole positive group)
-    :return: shuffled list of joined together multiple lists
+    Text Preprocessor for real tweets
     """
-    res = []
+    def __init__(self, raw_tweet):
+        super(TextPreprocessor, self).__init__()
+        self.raw_tweet = raw_tweet
 
-    for datalist in args:
-        res += datalist
-
-    shuffle(res)
-
-    return res
-
-
-def find_features(document, word_features):
-    """
-    Checks id a words from word_features exists in document
-
-    :param document: positive / negative tokens
-    :param word_features: common words from both negative and positive
-    :return:
-    """
-    words = set(document)
-    features = {}
-
-    for wf in word_features:
-        features[wf] = wf in words
-
-    return features
-
-
-if __name__ == "__main__":
-    # set up connection
-    conn = Connection()
-    collection = conn.get_english_collection()
-
-    try:
-        # WORK WITH TRAINING DATA
-        # work with positive tweets
-        positive = BaseTextPreprocessor(filename="training_data\\positive.txt", collection=collection,
-                                        category='pos')
-        positive.process_data()
-        positive_features = positive.get_most_frequent(100)
-        print(positive_features)
-        positive_tokens = positive.category_tokens
-        print(f'len of positive tokens: {len(positive_tokens)}')
-        positive_tweets = positive.tweets_lemmas
-        print('positive tweets', positive_tweets)
-
-        # work with negative tweets
-        negative = BaseTextPreprocessor(filename="training_data\\negative.txt", collection=collection,
-                                        category='neg')
-        negative.process_data()
-        negative_tokens = negative.category_tokens
-        negative_tweets = negative.tweets_lemmas
-        print('negative tweets', negative_tweets)
-
-        word_features = combine_and_shuffle(positive_tokens, negative_tokens)[:3000]
-        print('word features', word_features)
-        print(f'common length: {len(word_features)}')
-
-        documents = combine_and_shuffle(positive_tweets, negative_tweets)
-        # print(documents[0])
-
-        featuresets = []
-        for tweet, category in documents:
-            featuresets.append((find_features(tweet, word_features), category))
-        # print(len(featuresets))
-
-        training_set = featuresets[:600]
-        testing_set = featuresets[600:]
-
-        print(training_set[0])
-        print(testing_set[0])
-
-        classifier = nltk.NaiveBayesClassifier.train(training_set)
-        print("Classifier accuracy percent:", (nltk.classify.accuracy(classifier, testing_set)) * 100)
-
-        classifier.show_most_informative_features(15)
-
-
-    except:
-        traceback.print_exc()
-
-    # close connection
-    conn.close_connection()
-    print('Connection closed')
+    def process(self):
+        tweet_tokens_all = self.tokenize_by_word(self.raw_tweet)
+        # print(tweet_tokens_all)
+        self.tweets_lemmas.append(tweet_tokens_all)
