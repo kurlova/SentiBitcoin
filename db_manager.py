@@ -48,7 +48,7 @@ class Connection:
         """
         # if language == "en":
         collection = self.collection_en
-        today = datetime.datetime.now() - datetime.timedelta(days=1)
+        today = datetime.datetime.now()# - datetime.timedelta(days=1)
         today_begin = today.replace(hour=0, minute=0, second=0, microsecond=0).strftime('%a %b %d %H:%M:%S %z %Y')
         today_end = today.replace(hour=23, minute=59, second=59).strftime('%a %b %d %H:%M:%S %z %Y')
         tweets = list(collection.find({'created_at': {'$gt': today_begin, '$lt': today_end},

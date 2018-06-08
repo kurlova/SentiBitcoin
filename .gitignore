@@ -3,3 +3,9 @@ venv/
 database/
 .idea/
 /__pycache__
+POS abbreviations.txt
+experiment_sentiwordnet.py
+pickled_objects/
+trainers/__pycache__/
+trainers/trainer_multiple_categories.py
+training_data/reminder.txt

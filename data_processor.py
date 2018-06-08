@@ -1,4 +1,6 @@
+import collections
 import nltk
+import math
 from random import shuffle
 
 # check for wordnet presence, download if absent
@@ -67,6 +69,40 @@ def find_features(document, word_features):
     return features
 
 
+def compute_tf(document):
+    for el in document:
+        document[el] = document[el] / len(document)
+
+    return document
+
+
+def compute_idf(word, corpus):
+    return math.log10(len(corpus) / sum([1.0 for tweet in corpus if word in tweet]))
+
+
+def compute_tfidf(corpus):
+    documents = []
+
+    for tweet in corpus:
+        tfidf_dict = dict()
+        tweet_counter = collections.Counter(tweet)
+        tf_data = compute_tf(tweet_counter)
+
+        for word in tf_data:
+            tfidf_dict[word] = tf_data[word] * compute_idf(word, corpus)
+
+        documents.append(tfidf_dict)
+
+    all_words = []
+
+    for doc in documents:
+        for key, value in doc.items():
+            all_words.append((key, value))
+
+    all_words.sort(key=lambda el: el[1])
+    return all_words
+
+
 class Base:
     """
     Provides methods for data processing for further classification
@@ -78,8 +114,24 @@ class Base:
         self.category = category
         self.lemmatizer = WordNetLemmatizer()
         self.category_tokens = []
-        self.tweets_lemmas = []
+        self.tweets_lemmas = []  # all lemmas of all tweets
+        self.tweets_lemmas_categorized = []  # all lemmas of all tweets for training purposes
         self.bigrams = []
+
+    def get_text(self, tweet):
+        """
+        Find "full_text", if not present, find "text"
+        Not all tweets have full_text option, unfortunately :(
+
+        :param tweet: json object representing a tweet
+        :return: tweet['text'] or tweet['full_text']
+        """
+        try:
+            text = tweet["full_text"]
+        except:
+            text = tweet["text"]
+
+        return text
 
     def tokenize_by_sentence(self, tweet):
         """
@@ -160,11 +212,8 @@ class Base:
         :return: filtered list of tokens
         """
         no_stop_words = self.remove_stop_words(tweet_tokens)
-        # print('no stop words', no_stop_words)
-        no_general_words = self.remove_general_words(no_stop_words)
-        # print('no general words', no_general_words)
-        no_emoticons = self.remove_emoticons(no_general_words)
-        # print('no emoticons', no_emoticons)
+        # no_general_words = self.remove_general_words(no_stop_words)
+        no_emoticons = self.remove_emoticons(no_stop_words)
 
         return no_emoticons
 
@@ -205,7 +254,7 @@ class Base:
         :param tweet_sentence:
         :return: list with bigrams of a sentence
         """
-        self.bigrams += list(nltk.bigrams(tweet_sentence.split()))
+        return list(nltk.bigrams(tweet_sentence.split()))
 
 
 class TrainTextPreprocessor(Base):
@@ -239,21 +288,6 @@ class TrainTextPreprocessor(Base):
 
         return ids
 
-    def get_text(self, tweet):
-        """
-        Find "full_text", if not present, find "text"
-        Not all tweets have full_text option, unfortunately :(
-
-        :param tweet: json object representing a tweet
-        :return: tweet['text'] or tweet['full_text']
-        """
-        try:
-            text = tweet["full_text"]
-        except:
-            text = tweet["text"]
-
-        return text
-
     def process_data(self):
         """
         Data processing management
@@ -261,21 +295,21 @@ class TrainTextPreprocessor(Base):
         training_ids = self.get_training_ids()
 
         for tweet_id in training_ids:
-            # print(tweet_id)
+            print(tweet_id)
             tweet = self.db_collection.find_one({"id": int(tweet_id)})
             tweet_text = self.get_text(tweet)
-            # print(tweet_text)
+            print(tweet_text)
             tweet_sentences = self.tokenize_by_sentence(tweet_text)
             # print('sentence tokenizer', tweet_sentences)
 
             for sentence in tweet_sentences:
-                # print('sentence', sentence)
-                self.to_bigrams(sentence)
+                # print('sentence tokens', sentence)
                 tweet_tokens_all = self.tokenize_by_word(sentence)
-                # print('tokens', tweet_tokens_all)
+                # print('tokens word tokens', tweet_tokens_all)
                 tweet_tokens = self.left_significant_words(tweet_tokens_all)
+                # print('removed stop words', tweet_tokens)
                 pos_tokens = self.get_part_of_speech(tweet_tokens)
-                # print(pos_tokens)
+                # print('pos tagged', pos_tokens)
 
                 tweet_lemmas = []
                 for token in pos_tokens:
@@ -284,22 +318,31 @@ class TrainTextPreprocessor(Base):
 
                     self.category_tokens.append(lemma)
                     tweet_lemmas.append(lemma)
+                    # print('tweet lemmas', tweet_lemmas)
 
                 # append each tweet lemmas into this list
-                self.tweets_lemmas.append((tweet_lemmas, self.category))
-            # print()
-        print(len(self.category_tokens))
+                self.tweets_lemmas.append(tweet_lemmas)
+                self.tweets_lemmas_categorized.append((tweet_lemmas, self.category))
+                # print('tweets_lemmas_categorized', self.tweets_lemmas_categorized)
+                # bigrams = self.to_bigrams(sentence)
+                # self.tweets_lemmas[-1][0].extend(bigrams)
 
 
 class TextPreprocessor(Base):
     """
     Text Preprocessor for real tweets
     """
-    def __init__(self, raw_tweet):
+    def __init__(self, tweet_json):
         super(TextPreprocessor, self).__init__()
-        self.raw_tweet = raw_tweet
+        self.tweet_json = tweet_json
+
+    @property
+    def tweet_text(self):
+        return self.get_text(self.tweet_json)
 
     def process(self):
-        tweet_tokens_all = self.tokenize_by_word(self.raw_tweet)
+        tweet_text = self.tweet_text
+        tweet_tokens_all = self.tokenize_by_word(tweet_text)
         # print(tweet_tokens_all)
         self.tweets_lemmas.append(tweet_tokens_all)
+        # self.to_bigrams(tweet_text)

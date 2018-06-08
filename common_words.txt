@@ -20,14 +20,3 @@ $
 [
 ]
 |
-http
-https
-rt
-bitcoin
-blockchain
-btc
-cryptocurrency
-crypto
-ico
-ethereum
-eth
